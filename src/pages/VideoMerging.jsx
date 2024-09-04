@@ -21,7 +21,7 @@ function VideoMerging() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-r from-blue-100 to-purple-100 py-20 px-6">
+    <div className="min-h-screen bg-gradient-to-r from-blue-100 to-purple-100 py-40 px-6">
       <div className="max-w-4xl mx-auto text-center mt-15">
         <h2 className="text-4xl font-bold text-gray-800 mb-8">Merge Videos</h2>
         <p className="text-lg text-gray-600 mb-8">
