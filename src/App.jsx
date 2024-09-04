@@ -26,6 +26,9 @@ function App() {
         <Route path="/video-merging" element={<VideoMerging />} />
         <Route path="/video-compression" element={<VideoCompressor />} />
       </Routes>
+      <div className="transition-layer">
+        <div className="h-5 bg-gradient-to-b from-[#e6e9fe] to-[#c1dbfe]"></div>
+      </div>
       <Footer />
     </Router>
   );
