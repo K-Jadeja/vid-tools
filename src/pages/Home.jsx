@@ -19,7 +19,7 @@ function Home() {
           VidTools: Video Utilities App
         </h1>
         <p className="text-xl text-gray-600 mb-8">
-          All your video processing needs in one place.
+          All your video processing needs in one place!
         </p>
         <Link
           to="/generate-subtitles"
