@@ -1,9 +1,9 @@
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 import axios from "axios";
 import VideoUpload from "../components/VideoUpload";
 import CustomVideoPlayer from "../components/CustomVideoPlayer";
 
-const API_URL = "http://localhost:3001/api/extract-mp3";
+const API_BASE_URL = "http://localhost:3001";
 
 function ExtractMp3() {
   const [videoFile, setVideoFile] = useState(null);
@@ -32,15 +32,40 @@ function ExtractMp3() {
     formData.append("video", videoFile);
 
     try {
-      const response = await axios.post(API_URL, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      setAudioFile(response.data.outputFile);
+      const response = await axios.post(
+        `${API_BASE_URL}/api/extract-mp3`,
+        formData,
+        {
+          headers: { "Content-Type": "multipart/form-data" },
+        }
+      );
+      const audioUrl = `${API_BASE_URL}${response.data.outputFile}`;
+      setAudioFile(audioUrl);
     } catch (error) {
       console.error("Error extracting MP3:", error);
       setError("Failed to extract MP3. Please try again.");
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleDownload = async () => {
+    try {
+      const response = await axios.get(audioFile, {
+        responseType: "blob",
+      });
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", "extracted-audio.mp3");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Download failed:", error);
+      setError("Failed to download the audio. Please try again.");
     }
   };
 
@@ -84,19 +109,15 @@ function ExtractMp3() {
               controls
               className="w-full bg-white bg-opacity-30 backdrop-blur-md p-4 rounded-lg"
             >
-              <source
-                src={`http://localhost:3001${audioFile}`}
-                type="audio/mpeg"
-              />
+              <source src={audioFile} type="audio/mpeg" />
               Your browser does not support the audio element.
             </audio>
-            <a
-              href={`http://localhost:3001${audioFile}`}
-              download
+            <button
+              onClick={handleDownload}
               className="mt-4 inline-block bg-green-500 text-white px-6 py-3 rounded-full shadow-md hover:bg-green-600 transition-colors"
             >
               Download MP3
-            </a>
+            </button>
           </div>
         )}
       </div>

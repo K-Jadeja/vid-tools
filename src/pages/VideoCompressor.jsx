@@ -3,6 +3,8 @@ import VideoUpload from "../components/VideoUpload";
 import CustomVideoPlayer from "../components/CustomVideoPlayer";
 import axios from "axios";
 
+const API_BASE_URL = "http://localhost:3001"; // Adjust this to match your backend URL
+
 function VideoCompressor() {
   const [videoFile, setVideoFile] = useState(null);
   const [compressionLevel, setCompressionLevel] = useState("medium");
@@ -10,35 +12,69 @@ function VideoCompressor() {
   const [compressedVideo, setCompressedVideo] = useState(null);
   const [error, setError] = useState(null);
   const [compressedSize, setCompressedSize] = useState(null);
+  const [originalSize, setOriginalSize] = useState(null);
+  const [compressionStats, setCompressionStats] = useState(null);
 
   const handleFileUpload = (file) => {
     setVideoFile(file);
     setCompressedVideo(null); // Clear previous output when a new file is uploaded
     setError(null);
+    setOriginalSize((file.size / (1024 * 1024)).toFixed(2)); // Calculate original file size in MB
   };
 
   const handleCompressVideo = async () => {
     if (!videoFile) return;
 
     setIsProcessing(true);
-    setError(null); // Clear previous errors
+    setError(null);
     const formData = new FormData();
     formData.append("video", videoFile);
     formData.append("quality", compressionLevel);
 
     try {
-      const response = await axios.post("/api/compress", formData, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-      });
-      setCompressedVideo(response.data.outputFile);
-      setCompressedSize((response.data.fileSize / (1024 * 1024)).toFixed(2)); // Compressed file size in MB
+      const response = await axios.post(
+        `${API_BASE_URL}/api/compress`,
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        }
+      );
+
+      // Construct the full URL for the compressed video
+      const compressedVideoUrl = `${API_BASE_URL}${response.data.outputFile}`;
+      setCompressedVideo(compressedVideoUrl);
+      setCompressedSize(
+        (response.data.stats.compressedSize / (1024 * 1024)).toFixed(2)
+      );
+      setCompressionStats(response.data.stats);
     } catch (error) {
       console.error("Compression failed:", error);
       setError("Video compression failed. Please try again.");
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleDownload = async () => {
+    try {
+      const response = await axios.get(compressedVideo, {
+        responseType: "blob",
+      });
+
+      // Create a blob URL and trigger download
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", "compressed-video.mp4");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Download failed:", error);
+      setError("Failed to download the video. Please try again.");
     }
   };
 
@@ -57,7 +93,7 @@ function VideoCompressor() {
         {videoFile && (
           <div className="mt-8">
             <h3 className="text-xl font-semibold mb-4">
-              Original Video Preview:
+              Original Video Preview (Size: {originalSize} MB):
             </h3>
             <CustomVideoPlayer src={URL.createObjectURL(videoFile)} />
           </div>
@@ -70,11 +106,11 @@ function VideoCompressor() {
               onChange={(e) => setCompressionLevel(e.target.value)}
               className="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg bg-gray-50 mb-4"
             >
-              <option value="very_high">Very High</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-              <option value="very_low">Very Low</option>
+              <option value="very_high">Very High (1080p, 3000kbps)</option>
+              <option value="high">High (720p, 2000kbps)</option>
+              <option value="medium">Medium (480p, 1000kbps)</option>
+              <option value="low">Low (360p, 500kbps)</option>
+              <option value="very_low">Very Low (240p, 250kbps)</option>
             </select>
 
             <button
@@ -96,14 +132,18 @@ function VideoCompressor() {
             <h3 className="text-xl font-semibold mb-4">
               Compressed Video Preview (Size: {compressedSize} MB):
             </h3>
+            {compressionStats && (
+              <div className="mb-4 text-gray-600">
+                <p>Compression Ratio: {compressionStats.compressionRatio}</p>
+              </div>
+            )}
             <CustomVideoPlayer src={compressedVideo} />
-            <a
-              href={compressedVideo}
-              download
+            <button
+              onClick={handleDownload}
               className="mt-4 inline-block bg-green-500 text-white px-6 py-3 rounded-full shadow-md hover:bg-green-600 transition-colors"
             >
               Download Compressed Video
-            </a>
+            </button>
           </div>
         )}
       </div>

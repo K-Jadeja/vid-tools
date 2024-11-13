@@ -2,3 +2,7 @@ node_modules
 node_modules
 .env
 .env.local
+/backend/node_modules
+/backend/output
+/backend/uploads
+/backend/temp

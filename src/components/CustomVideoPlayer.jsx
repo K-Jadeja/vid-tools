@@ -13,7 +13,7 @@ const CustomVideoPlayer = ({ src, poster, showDownload = true }) => {
         <source src={src} type="video/mp4" />
         Your browser does not support the video tag.
       </video>
-      {showDownload && (
+      {/* {showDownload && (
         <a
           href={src}
           download
@@ -21,7 +21,7 @@ const CustomVideoPlayer = ({ src, poster, showDownload = true }) => {
         >
           Download
         </a>
-      )}
+      )} */}
     </div>
   );
 };
