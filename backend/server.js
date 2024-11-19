@@ -1,21 +1,24 @@
 const express = require("express");
 const multer = require("multer");
 const cors = require("cors");
-const path = require("path");
+require("dotenv").config();
+const { createClient } = require("@deepgram/sdk");
 const fs = require("fs");
+const path = require("path");
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegPath = require("ffmpeg-static");
+const { promisify } = require("util");
+const writeFile = promisify(fs.writeFile);
+const Jimp = require("jimp");
 
 ffmpeg.setFfmpegPath(ffmpegPath);
-require("dotenv").config();
-const { OpenAI } = require("openai"); // Updated OpenAI SDK
 
 const app = express();
 
 // Updated CORS configuration
 app.use(
   cors({
-    origin: ["http://localhost:5173", "https://vidtools.vercel.app"], // Replace with your frontend URL
+    origin: ["http://localhost:5173", "https://vidtools.vercel.app"],
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type"],
     credentials: true,
@@ -25,7 +28,6 @@ app.use(
 app.use(cors());
 app.use(express.json());
 
-// Configure multer for video upload
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadDir = "uploads";
@@ -40,7 +42,285 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const deepgramApiKey = process.env.DEEPGRAM_API_KEY;
+
+if (!deepgramApiKey) {
+  throw new Error("Deepgram API key is missing in environment variables.");
+}
+
+// Initialize Deepgram client
+const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
+
+// Constants for video dimensions
+const ResizeImageWidth = 1280;
+const ResizeImageHeight = 720;
+const MaxWordsPerLine = 7;
+const MaxCharsPerLine = 35;
+
+app.post("/api/generatesubtitles", upload.single("video"), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "No video file provided" });
+  }
+
+  const inputPath = req.file.path;
+  const resizedFileName = `resized-${Date.now()}.mp4`;
+  const resizedPath = path.join(__dirname, "output", resizedFileName);
+  const outputFileName = `subtitled-${Date.now()}.mp4`;
+  const outputPath = path.join(__dirname, "output", outputFileName);
+  const subtitlesPath = path.join(
+    __dirname,
+    "output",
+    `subs-${Date.now()}.srt`
+  );
+
+  let filesCreated = [];
+
+  try {
+    await fs.promises.mkdir(path.join(__dirname, "output"), {
+      recursive: true,
+    });
+
+    await new Promise((resolve, reject) => {
+      ffmpeg(inputPath)
+        .size(`${ResizeImageWidth}x${ResizeImageHeight}`)
+        .outputOptions([
+          "-c:v",
+          "libx264",
+          "-c:a",
+          "aac",
+          "-strict",
+          "experimental",
+        ])
+        .output(resizedPath)
+        .on("end", resolve)
+        .on("error", reject)
+        .run();
+    });
+    filesCreated.push(resizedPath);
+
+    // 2. Transcribe the video using Deepgram
+    const audioStream = fs.createReadStream(resizedPath);
+    const { result, error } = await deepgram.listen.prerecorded.transcribeFile(
+      audioStream,
+      {
+        model: "nova-2",
+        smart_format: true,
+        utterances: true,
+        timestamps: "word",
+      }
+    );
+
+    if (error) {
+      throw new Error(`Transcription failed: ${error.message}`);
+    }
+
+    // 3. Convert Deepgram response to SRT format with shorter utterances
+    const srtContent = generateSRT(result.results.utterances);
+    await writeFile(subtitlesPath, srtContent, "utf8");
+    filesCreated.push(subtitlesPath);
+
+    // 4. Get video dimensions for subtitles filter
+    const videoInfo = await getVideoInfo(resizedPath);
+    const videoWidth = videoInfo.width || ResizeImageWidth;
+    const videoHeight = videoInfo.height || ResizeImageHeight;
+
+    // 5. Process resized video with subtitles using proper escape and formatting
+    const escapedSubPath = subtitlesPath.replace(/[\\:]/g, "\\$&");
+    const subtitlesFilter = `subtitles='${escapedSubPath}':force_style='FontSize=24,FontName=Arial,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,BorderStyle=3,Outline=1,Shadow=0,MarginV=35'`;
+
+    await new Promise((resolve, reject) => {
+      ffmpeg(resizedPath)
+        .outputOptions([
+          "-vf",
+          subtitlesFilter,
+          "-c:v",
+          "libx264",
+          "-c:a",
+          "copy",
+          "-preset",
+          "medium",
+          "-movflags",
+          "+faststart",
+        ])
+        .output(outputPath)
+        .on("start", (commandLine) => {
+          console.log("[FFMPEG Command]:", commandLine);
+        })
+        .on("progress", (progress) => {
+          console.log(`[SubtitleOverlay] Progress: ${progress.percent}%`);
+        })
+        .on("end", resolve)
+        .on("error", (err) => {
+          console.error("[FFMPEG Error]:", err);
+          reject(err);
+        })
+        .run();
+    });
+    filesCreated.push(outputPath);
+
+    // 6. Clean up temporary files with proper error handling
+    await cleanupFiles([inputPath, resizedPath, subtitlesPath], filesCreated);
+
+    res.json({
+      success: true,
+      outputFile: `/output/${outputFileName}`,
+      fileSize: fs.statSync(outputPath).size,
+    });
+  } catch (error) {
+    console.error("[TranscriptionOverlay] Error:", error);
+    res.status(500).json({ error: "Failed to process video" });
+
+    // Clean up on error
+    await cleanupFiles(
+      [inputPath, resizedPath, outputPath, subtitlesPath],
+      filesCreated
+    );
+  }
+});
+
+// Helper function to get video information
+function getVideoInfo(videoPath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(videoPath, (err, metadata) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      const videoStream = metadata.streams.find(
+        (stream) => stream.codec_type === "video"
+      );
+      resolve({
+        width: videoStream?.width,
+        height: videoStream?.height,
+      });
+    });
+  });
+}
+
+// Helper function for safe file cleanup
+async function cleanupFiles(filePaths, filesCreated) {
+  for (const filePath of filePaths) {
+    try {
+      if (fs.existsSync(filePath) && filesCreated.includes(filePath)) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        await fs.promises.unlink(filePath);
+      }
+    } catch (err) {
+      console.error(`Failed to delete file ${filePath}:`, err);
+    }
+  }
+}
+
+// Modified to split utterances into smaller chunks
+function generateSRT(utterances) {
+  let srtContent = "";
+  let index = 1;
+
+  utterances.forEach((utterance) => {
+    // Split longer utterances into smaller chunks
+    const chunks = splitUtteranceIntoChunks(utterance.transcript);
+    const timePerChunk = (utterance.end - utterance.start) / chunks.length;
+
+    chunks.forEach((chunk, i) => {
+      const chunkStart = utterance.start + i * timePerChunk;
+      const chunkEnd = chunkStart + timePerChunk;
+      const startTime = formatSRTTime(chunkStart);
+      const endTime = formatSRTTime(chunkEnd);
+
+      srtContent += `${index}\n`;
+      srtContent += `${startTime} --> ${endTime}\n`;
+      srtContent += `${chunk}\n\n`;
+
+      index++;
+    });
+  });
+
+  return srtContent;
+}
+
+// New function to split utterances into smaller chunks
+function splitUtteranceIntoChunks(text) {
+  const words = text.split(" ");
+  let chunks = [];
+  let currentChunk = [];
+  let currentLength = 0;
+  let wordCount = 0;
+
+  for (const word of words) {
+    if (
+      wordCount >= MaxWordsPerLine ||
+      currentLength + word.length + 1 > MaxCharsPerLine
+    ) {
+      if (currentChunk.length > 0) {
+        chunks.push(currentChunk.join(" "));
+        currentChunk = [];
+        currentLength = 0;
+        wordCount = 0;
+      }
+    }
+
+    currentChunk.push(word);
+    currentLength += word.length + 1;
+    wordCount++;
+  }
+
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk.join(" "));
+  }
+
+  return chunks;
+}
+
+function formatSRTTime(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  const ms = Math.floor((seconds % 1) * 1000);
+
+  return (
+    `${hours.toString().padStart(2, "0")}:` +
+    `${minutes.toString().padStart(2, "0")}:` +
+    `${secs.toString().padStart(2, "0")},` +
+    `${ms.toString().padStart(3, "0")}`
+  );
+}
+
+// Function to transcribe audio file using a callback
+async function transcribeWithDeepgram(audioFilePath, callbackUrl) {
+  try {
+    console.log("Starting transcription with Deepgram...");
+
+    const audioData = fs.readFileSync(audioFilePath); // Read the audio file
+
+    // Use `transcribeFileCallback` with buffer and callback URL
+    const { result, error } =
+      await deepgram.listen.prerecorded.transcribeFileCallback(
+        audioData,
+        new CallbackUrl(callbackUrl), // URL to receive transcription results
+        {
+          model: "nova-2", // Use 'nova-2' for better accuracy
+          punctuate: true,
+          smart_format: true,
+          utterances: true,
+        }
+      );
+
+    if (error) {
+      console.error("Deepgram API error:", error.message);
+      throw new Error("Failed to transcribe audio.");
+    }
+
+    console.log("Transcription completed successfully.");
+    console.log("Transcription result:", result);
+
+    return result; // Return transcription details
+  } catch (err) {
+    console.error("Error during transcription:", err.message);
+    throw new Error(
+      "An error occurred while transcribing audio with Deepgram."
+    );
+  }
+}
 
 // Ensure necessary directories exist
 const dirs = ["temp", "output"];
@@ -513,76 +793,76 @@ app.use(
 );
 
 // 6. Subtitle Generation Route
-app.post("/api/generatesubtitles", upload.single("video"), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: "No video file provided" });
+app.post(
+  "/api/generatesubtitles1",
+  upload.single("video"),
+  async (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ error: "No video file provided" });
+    }
+
+    const inputPath = req.file.path;
+    const outputFileName = `subtitled-${Date.now()}-${req.file.originalname}`;
+    const outputPath = path.join(__dirname, "output", outputFileName);
+    const tempSubtitlePath = path.join(__dirname, "temp", `${Date.now()}.srt`);
+
+    try {
+      // Step 1: Extract audio from video
+      const audioPath = path.join(__dirname, "temp", `audio-${Date.now()}.wav`);
+      await new Promise((resolve, reject) => {
+        ffmpeg(inputPath)
+          .output(audioPath)
+          .toFormat("wav")
+          .on("end", resolve)
+          .on("error", reject)
+          .run();
+      });
+
+      // Step 2: Transcribe audio with Deepgram
+      const transcript = await transcribeWithDeepgram(audioPath);
+
+      // Step 3: Convert transcript to SRT
+      const subtitleContent = subtitlesToSRT(transcript);
+      fs.writeFileSync(tempSubtitlePath, subtitleContent);
+
+      // Step 4: Overlay subtitles on the video
+      await new Promise((resolve, reject) => {
+        ffmpeg(inputPath)
+          .input(tempSubtitlePath)
+          .outputOptions([
+            "-vf subtitles=" + tempSubtitlePath,
+            "-preset medium",
+            "-movflags +faststart",
+          ])
+          .output(outputPath)
+          .on("progress", (progress) => {
+            console.log(`[Subtitle] Progress: ${progress.percent}%`);
+          })
+          .on("end", resolve)
+          .on("error", reject)
+          .run();
+      });
+
+      // Clean up temporary files
+      fs.unlinkSync(inputPath); // Original video
+      fs.unlinkSync(audioPath); // Extracted audio
+      fs.unlinkSync(tempSubtitlePath); // Subtitle file
+
+      // Step 5: Return final video
+      res.json({
+        success: true,
+        outputFile: `/output/${outputFileName}`,
+      });
+    } catch (error) {
+      console.error("[GenerateSubtitles] Error:", error);
+      res.status(500).json({ error: "Failed to generate subtitles" });
+
+      // Clean up on error
+      if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+      if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+    }
   }
-
-  const inputPath = req.file.path;
-  const outputFileName = `subtitled-${Date.now()}-${req.file.originalname}`;
-  const outputPath = path.join(__dirname, "output", outputFileName);
-  const tempSubtitlePath = path.join(__dirname, "temp", `${Date.now()}.srt`);
-
-  try {
-    // Step 1: Extract audio from video for transcription
-    const audioPath = path.join(__dirname, "temp", `audio-${Date.now()}.wav`);
-    await new Promise((resolve, reject) => {
-      ffmpeg(inputPath)
-        .output(audioPath)
-        .toFormat("wav")
-        .on("end", resolve)
-        .on("error", reject)
-        .run();
-    });
-
-    // Step 2: Transcribe the audio using OpenAI's Whisper API
-    const response = await openai.audio.transcriptions.create({
-      file: fs.createReadStream(audioPath),
-      model: "whisper-1",
-    });
-
-    // Step 3: Format the transcription into .srt format
-    const subtitles = response.text;
-    const subtitleContent = subtitlesToSRT(subtitles);
-    fs.writeFileSync(tempSubtitlePath, subtitleContent);
-
-    // Step 4: Overlay subtitles onto the video
-    await new Promise((resolve, reject) => {
-      ffmpeg(inputPath)
-        .input(tempSubtitlePath)
-        .outputOptions([
-          "-vf subtitles=" + tempSubtitlePath,
-          "-preset medium",
-          "-movflags +faststart",
-        ])
-        .output(outputPath)
-        .on("progress", (progress) => {
-          console.log(`[Subtitle] Progress: ${progress.percent}%`);
-        })
-        .on("end", resolve)
-        .on("error", reject)
-        .run();
-    });
-
-    // Clean up temporary files
-    fs.unlinkSync(inputPath); // Original video
-    fs.unlinkSync(audioPath); // Extracted audio
-    fs.unlinkSync(tempSubtitlePath); // Subtitle file
-
-    // Step 5: Return final video
-    res.json({
-      success: true,
-      outputFile: `/output/${outputFileName}`,
-    });
-  } catch (error) {
-    console.error("[GenerateSubtitles] Error:", error);
-    res.status(500).json({ error: "Failed to generate subtitles" });
-
-    // Clean up on error
-    if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
-    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-  }
-});
+);
 
 // Helper function to convert text to .srt format
 function subtitlesToSRT(transcription) {
