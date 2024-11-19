@@ -14,23 +14,23 @@ function Home() {
 
   return (
     <div className="min-h-screen bg-gradient-to-r from-blue-100 to-purple-100 pt-24">
-      <section className="text-center py-12 px-4 md:py-20">
-        <h1 className="text-3xl md:text-5xl font-bold text-gray-800 mb-4">
+      <section className="text-center py-8 px-4 md:py-20">
+        <h1 className="text-2xl md:text-5xl font-bold text-gray-800 mb-4">
           VidTools: Video Utilities App
         </h1>
-        <p className="text-lg md:text-xl text-gray-600 mb-8">
+        <p className="text-base md:text-xl text-gray-600 mb-6 md:mb-8">
           All your video processing needs in one place!
         </p>
         <Link
           to="/generate-subtitles"
-          className="inline-block bg-blue-600 text-white px-6 py-3 rounded-full shadow-md hover:bg-blue-700 transition-colors"
+          className="inline-block bg-blue-600 text-white px-4 md:px-6 py-2 md:py-3 rounded-full shadow-md hover:bg-blue-700 transition-colors"
         >
           Get Started
         </Link>
       </section>
 
       {/* Utility Cards - Bento Grid */}
-      <section className="py-8 px-4 md:px-6">
+      <section className="py-6 md:py-8 px-4 md:px-6">
         <div className="max-w-6xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-8">
           {utilities.map((util) => (
             <UtilityCard
