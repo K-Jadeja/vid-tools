@@ -15,10 +15,9 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 
 const app = express();
 
-// Updated CORS configuration
 app.use(
   cors({
-    origin: ["http://localhost:5173", "https://vidtools.vercel.app"],
+    origin: ["http://localhost:5173", "https://vidtools.vercel.app/"],
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type"],
     credentials: true,
@@ -48,10 +47,8 @@ if (!deepgramApiKey) {
   throw new Error("Deepgram API key is missing in environment variables.");
 }
 
-// Initialize Deepgram client
 const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
 
-// Constants for video dimensions
 const ResizeImageWidth = 1280;
 const ResizeImageHeight = 720;
 const MaxWordsPerLine = 7;
@@ -98,7 +95,6 @@ app.post("/api/generatesubtitles", upload.single("video"), async (req, res) => {
     });
     filesCreated.push(resizedPath);
 
-    // 2. Transcribe the video using Deepgram
     const audioStream = fs.createReadStream(resizedPath);
     const { result, error } = await deepgram.listen.prerecorded.transcribeFile(
       audioStream,
@@ -114,17 +110,14 @@ app.post("/api/generatesubtitles", upload.single("video"), async (req, res) => {
       throw new Error(`Transcription failed: ${error.message}`);
     }
 
-    // 3. Convert Deepgram response to SRT format with shorter utterances
     const srtContent = generateSRT(result.results.utterances);
     await writeFile(subtitlesPath, srtContent, "utf8");
     filesCreated.push(subtitlesPath);
 
-    // 4. Get video dimensions for subtitles filter
     const videoInfo = await getVideoInfo(resizedPath);
     const videoWidth = videoInfo.width || ResizeImageWidth;
     const videoHeight = videoInfo.height || ResizeImageHeight;
 
-    // 5. Process resized video with subtitles using proper escape and formatting
     const escapedSubPath = subtitlesPath.replace(/[\\:]/g, "\\$&");
     const subtitlesFilter = `subtitles='${escapedSubPath}':force_style='FontSize=24,FontName=Arial,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,BorderStyle=3,Outline=1,Shadow=0,MarginV=35'`;
 
@@ -170,7 +163,6 @@ app.post("/api/generatesubtitles", upload.single("video"), async (req, res) => {
     console.error("[TranscriptionOverlay] Error:", error);
     res.status(500).json({ error: "Failed to process video" });
 
-    // Clean up on error
     await cleanupFiles(
       [inputPath, resizedPath, outputPath, subtitlesPath],
       filesCreated
@@ -178,7 +170,6 @@ app.post("/api/generatesubtitles", upload.single("video"), async (req, res) => {
   }
 });
 
-// Helper function to get video information
 function getVideoInfo(videoPath) {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(videoPath, (err, metadata) => {
@@ -197,7 +188,6 @@ function getVideoInfo(videoPath) {
   });
 }
 
-// Helper function for safe file cleanup
 async function cleanupFiles(filePaths, filesCreated) {
   for (const filePath of filePaths) {
     try {
@@ -211,13 +201,11 @@ async function cleanupFiles(filePaths, filesCreated) {
   }
 }
 
-// Modified to split utterances into smaller chunks
 function generateSRT(utterances) {
   let srtContent = "";
   let index = 1;
 
   utterances.forEach((utterance) => {
-    // Split longer utterances into smaller chunks
     const chunks = splitUtteranceIntoChunks(utterance.transcript);
     const timePerChunk = (utterance.end - utterance.start) / chunks.length;
 
@@ -238,7 +226,6 @@ function generateSRT(utterances) {
   return srtContent;
 }
 
-// New function to split utterances into smaller chunks
 function splitUtteranceIntoChunks(text) {
   const words = text.split(" ");
   let chunks = [];
@@ -285,20 +272,17 @@ function formatSRTTime(seconds) {
   );
 }
 
-// Function to transcribe audio file using a callback
 async function transcribeWithDeepgram(audioFilePath, callbackUrl) {
   try {
     console.log("Starting transcription with Deepgram...");
 
-    const audioData = fs.readFileSync(audioFilePath); // Read the audio file
-
-    // Use `transcribeFileCallback` with buffer and callback URL
+    const audioData = fs.readFileSync(audioFilePath);
     const { result, error } =
       await deepgram.listen.prerecorded.transcribeFileCallback(
         audioData,
-        new CallbackUrl(callbackUrl), // URL to receive transcription results
+        new CallbackUrl(callbackUrl),
         {
-          model: "nova-2", // Use 'nova-2' for better accuracy
+          model: "nova-2",
           punctuate: true,
           smart_format: true,
           utterances: true,

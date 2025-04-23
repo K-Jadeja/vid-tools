@@ -1,11 +1,32 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 
 function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  // Handle click outside
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setIsMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Handle link click
+  const handleLinkClick = () => {
+    setIsMenuOpen(false);
+  };
 
   return (
-    <nav className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 w-[95%] md:w-auto">
+    <nav
+      className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 w-[95%] md:w-auto"
+      ref={menuRef}
+    >
       <div className="bg-white bg-opacity-30 backdrop-blur-xl border border-white/10 shadow-2xl rounded-full px-4 md:px-12 py-5">
         {/* Desktop Menu */}
         <div className="hidden md:flex justify-center space-x-10">
@@ -72,18 +93,21 @@ function Navbar() {
               <Link
                 to="/generate-subtitles"
                 className="text-lg text-gray-600 hover:text-blue-500 font-medium transition-colors duration-300"
+                onClick={handleLinkClick}
               >
                 Generate Subtitles
               </Link>
               <Link
                 to="/extract-mp3"
                 className="text-lg text-gray-600 hover:text-blue-500 font-medium transition-colors duration-300"
+                onClick={handleLinkClick}
               >
                 Extract MP3
               </Link>
               <Link
                 to="/watermarking"
                 className="text-lg text-gray-600 hover:text-blue-500 font-medium transition-colors duration-300"
+                onClick={handleLinkClick}
               >
                 Watermarking
               </Link>

@@ -70,8 +70,8 @@ function ExtractMp3() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-r from-blue-100 to-purple-100 py-20 px-6">
-      <div className="max-w-4xl mx-auto text-center mt-15">
+    <div className="min-h-screen bg-gradient-to-r from-blue-100 to-purple-100 py-40 px-6">
+      <div className="max-w-4xl mx-auto text-center mt-15 bg-white bg-opacity-30 backdrop-blur-md rounded-lg p-8 shadow-lg">
         <h2 className="text-4xl font-bold text-gray-800 mb-8">Extract MP3</h2>
         <p className="text-lg text-gray-600 mb-8">
           Extract high-quality MP3 audio from your videos.
@@ -80,7 +80,8 @@ function ExtractMp3() {
         <VideoUpload onFileSelect={handleFileUpload} />
 
         {videoURL && (
-          <div className="my-4">
+          <div className="mt-8">
+            <h3 className="text-xl font-semibold mb-4">Video Preview:</h3>
             <CustomVideoPlayer
               src={videoURL}
               poster={null}
@@ -104,7 +105,8 @@ function ExtractMp3() {
         {error && <p className="text-red-500 mt-4">{error}</p>}
 
         {audioFile && (
-          <div className="mt-8 p-6 rounded-lg shadow-lg">
+          <div className="mt-8">
+            <h3 className="text-xl font-semibold mb-4">Extracted Audio:</h3>
             <audio
               controls
               className="w-full bg-white bg-opacity-30 backdrop-blur-md p-4 rounded-lg"
